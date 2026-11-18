@@ -121,4 +121,60 @@ Per ogni dispositivo all'interno della lista di avvio, il BIOS esegue:
 
 Da questo momento la CPU esegue il codice scritto nel disco e si ha pieno potere del computer. Questo settore si chiama MBR (Master Boot Record), dentro si trova il boot loader e la tabella delle partizioni del disco.
 
+### Esercizio 1
+
+Con il comando `qemu-system-i386 -S -monitor stdio` viene accesa una macchina virtuale in pausa (subito dopo il comando di RESET) e apre una console su cui poter scrivere i comandi alla CPU.  
+Scrivendo il comando `info registers` si possono vedere i registri della CPU e il loro valore. Il risultato è:
+
+```
+CPU#0
+EAX=00000000 EBX=00000000 ECX=00000000 EDX=00000663
+ESI=00000000 EDI=00000000 EBP=00000000 ESP=00000000
+EIP=0000fff0 EFL=00000002 [-------] CPL=0 II=0 A20=1 SMM=0 HLT=0
+ES =0000 00000000 0000ffff 00009300
+CS =f000 ffff0000 0000ffff 00009b00
+SS =0000 00000000 0000ffff 00009300
+DS =0000 00000000 0000ffff 00009300
+FS =0000 00000000 0000ffff 00009300
+GS =0000 00000000 0000ffff 00009300
+LDT=0000 00000000 0000ffff 00008200
+TR =0000 00000000 0000ffff 00008b00
+GDT=     00000000 0000ffff
+IDT=     00000000 0000ffff
+CR0=60000010 CR2=00000000 CR3=00000000 CR4=00000000
+DR0=00000000 DR1=00000000 DR2=00000000 DR3=00000000 
+DR6=ffff0ff0 DR7=00000400
+EFER=0000000000000000
+FCW=037f FSW=0000 [ST=0] FTW=00 MXCSR=00001f80
+FPR0=0000000000000000 0000 FPR1=0000000000000000 0000
+FPR2=0000000000000000 0000 FPR3=0000000000000000 0000
+FPR4=0000000000000000 0000 FPR5=0000000000000000 0000
+FPR6=0000000000000000 0000 FPR7=0000000000000000 0000
+XMM00=0000000000000000 0000000000000000 XMM01=0000000000000000 0000000000000000
+XMM02=0000000000000000 0000000000000000 XMM03=0000000000000000 0000000000000000
+XMM04=0000000000000000 0000000000000000 XMM05=0000000000000000 0000000000000000
+XMM06=0000000000000000 0000000000000000 XMM07=0000000000000000 0000000000000000
+```
+
+Possiamo quindi vedere che:
+
+- CS è uguale a f000 ffff0000
+- EIP è uguale a 0000fff0
+
+Quindi corrisponde a quello che è stato detto in precedenza, CS è impostato come 0xFFF0 ma la base nascosta è 0xFFFF0000 e l'offset EIP è 0xFFF0.
+
+Provando a leggere il contenuto dell'indirizzo 0xFFFFFFF0 possiamo vedere le istruzioni del BIOS con il comando `xp /16xb 0xfffffff0`. Il Risultato è:
+
+```
+00000000fffffff0: 0xea 0x5b 0xe0 0x00 0xf0 0x30 0x36 0x2f
+00000000fffffff8: 0x32 0x33 0x2f 0x39 0x39 0x00 0xfc 0x00
+```
+
+i byte che ci interessano sono i primi 5.
+
+- 0xea - è un jump far, dice alla CPU di andare a leggere le istruzioni al segmento:offset indicato nei 4 byte successivi. Essendo una CPU Little Endian, a sinistra troveremo i byte meno significativi, quindi vanno letti al contrario.
+- 0x5b e 0xe0 - è l'offset 0xe05b
+- 0x00 e 0xf0 - è il segmento 0xf000
+
+Quindi l'istruzione dice alla CPU `jmp 0xf000:0xe05b`, facendo il calcolo (dopo il jump far quindi con la regola per * 16): 0xF000 * 16 + 0xE05B = 0xF0000 + 0xE05B = 0xFE05B.
 
