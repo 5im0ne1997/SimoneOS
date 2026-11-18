@@ -178,3 +178,5 @@ i byte che ci interessano sono i primi 5.
 
 Quindi l'istruzione dice alla CPU `jmp 0xf000:0xe05b`, facendo il calcolo (dopo il jump far quindi con la regola per * 16): 0xF000 * 16 + 0xE05B = 0xF0000 + 0xE05B = 0xFE05B.
 
+Gli altri byte, dal sesto in poi, sono la data di creazione del BIOS e il tipo di computer. In questo caso sarebbe `06/23/99 IBM PC/AT`, il tipo di computer è il penultimo carattere 0xfc che rappresenta il PC della IBM, l'ultimo è solo un riempitivo.
+
