@@ -233,7 +233,7 @@ Con `printf "\x55\xAA" | dd of=disk.img bs=1 seek=510 conv=notrunc` aggiungo i b
 000001f0: 0000 0000 0000 0000 0000 0000 0000 55aa  ..............U.
 ```
 
-In questo modo il BIOS vede che è un disco di boot. Copia il contenuto all'indirizzo 0x7C00, poi fa un jump long a 0x7C00, CS si resetta a 0x0000 e si torna a calcolare * 16 la base.  
+In questo modo il BIOS vede che è un disco di boot. Copia il contenuto all'indirizzo 0x7C00, poi fa un jump long a 0x7C00, CS si resetta a 0x0000.  
 Da questo momento la CPU esegue il codice scritto dentro al disco. Essendo che dentro è una lista di 0x00 e la firma in fondo, esegue il contenuto ma senza fare nulla di particolare in quanto non gli stiamo dicendo di fare nulla.  
 Una volta che IP arriva a 0xFFFF, ricomincia da capo e setta IP=0x0000, essendo CS=0x0000, la CPU esegue il codice dentro alla tabella dei vettori IVT all'inizio della memoria.  
 
