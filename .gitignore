@@ -1,0 +1,5 @@
+.claude/
+*.img
+*.bin
+*.lst
+*.swp
