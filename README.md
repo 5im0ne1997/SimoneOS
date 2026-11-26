@@ -519,11 +519,70 @@ Ogni carattere è un numero (**ASCII**: `'A'` = 0x41, `'a'` = 0x61, `'0'` = 0x30
 
 ### Esercizi della lezione 2
 
-- [ ] **1.** Riscrivere `cli` + `hlt` in `boot.asm` con riempimento e firma; prevedere i byte e la dimensione; confrontare con `cmp` con l'immagine fatta a mano.
+- [x] **1.** Riscrivere `cli` + `hlt` in `boot.asm` con riempimento e firma; prevedere i byte e la dimensione; confrontare con `cmp` con l'immagine fatta a mano.
 - [ ] **2.** Ciclo di arresto con etichetta, `hlt` e `jmp`; prevedere i byte del `jmp` e verificarli con `ndisasm -o 0x7C00 boot.bin`.
 - [ ] **3.** Struttura completa (far jump, segmenti, stack) e stampa di un carattere con `INT 0x10`.
 - [ ] **4.** Stampa di una stringa terminata da 0 con un ciclo, preceduta da un a capo.
 - [ ] **5.** Togliere `org 0x7C00` e spiegare con il listing cosa stampa la CPU.
+
+#### Esercizio 1: risultati
+
+Il sorgente [`boot.asm`](boot.asm):
+
+```nasm
+bits 16
+org 0x7C00
+cli
+hlt
+times 510-($-$$) db 0x00
+dw 0xAA55
+```
+
+Assemblato con:
+
+```
+nasm -f bin boot.asm -o boot.bin -l boot.lst
+```
+
+Il file `boot.bin` è di **512 byte** esatti. Con `xxd boot.bin | sed -n '1p;$p'`:
+
+```
+00000000: faf4 0000 0000 0000 0000 0000 0000 0000  ................
+000001f0: 0000 0000 0000 0000 0000 0000 0000 55aa  ..............U.
+```
+
+- `FA F4` all'inizio: `cli` e `hlt`, tradotti da NASM negli stessi byte scritti a mano nella lezione 1.
+- `times 510-($-$$) db 0x00`: alla riga di `times`, `$` (la riga corrente) vale 0x7C02 e `$$` (l'inizio) vale 0x7C00, quindi `$-$$` = 2 byte già scritti e servono 510 − 2 = 508 zeri. Le parentesi sono necessarie: `510-$-$$` vorrebbe dire 510 − 0x7C02 − 0x7C00.
+- `dw 0xAA55` scrive `55 AA` per via del little-endian.
+
+Ricreata l'immagine fatta a mano (512 byte di zeri, `FA F4` all'inizio e `55 AA` alla fine con `dd` e `printf`), il confronto con `cmp boot.bin disk.img` non stampa nulla: **i due file sono identici byte per byte**. L'assembler non aggiunge niente, traduce soltanto.
+
+Avvio con `qemu-system-i386 -drive format=raw,file=boot.bin -monitor stdio` e `info registers`:
+
+```
+CPU#0
+EAX=0000aa55 EBX=00000000 ECX=00000000 EDX=00000080
+ESI=00000000 EDI=00000000 EBP=00000000 ESP=00006f0c
+EIP=00007c02 EFL=00000002 [-------] CPL=0 II=0 A20=1 SMM=0 HLT=1
+ES =0000 00000000 0000ffff 00009300
+CS =0000 00000000 0000ffff 00009b00
+SS =0000 00000000 0000ffff 00009300
+DS =0000 00000000 0000ffff 00009300
+FS =0000 00000000 0000ffff 00009300
+GS =0000 00000000 0000ffff 00009300
+LDT=0000 00000000 0000ffff 00008200
+TR =0000 00000000 0000ffff 00008b00
+GDT=     00000000 00000000
+IDT=     00000000 000003ff
+CR0=00000010 CR2=00000000 CR3=00000000 CR4=00000000
+```
+
+Funziona come previsto, con lo stesso risultato dell'esperimento della lezione 1:
+
+- **HLT=1** e QEMU a circa lo 0% di CPU: la CPU è ferma su `hlt`;
+- **EIP=0x7C02**: IP punta già all'istruzione dopo `hlt`;
+- **EFL=0x00000002**: IF = 0, effetto di `cli`;
+- **CS=0000** e **DL=0x80**: SeaBIOS ha saltato a `0000:7C00` dal primo disco rigido.
 
 #### Domande di verifica
 
