@@ -520,7 +520,7 @@ Ogni carattere è un numero (**ASCII**: `'A'` = 0x41, `'a'` = 0x61, `'0'` = 0x30
 ### Esercizi della lezione 2
 
 - [x] **1.** Riscrivere `cli` + `hlt` in `boot.asm` con riempimento e firma; prevedere i byte e la dimensione; confrontare con `cmp` con l'immagine fatta a mano.
-- [ ] **2.** Ciclo di arresto con etichetta, `hlt` e `jmp`; prevedere i byte del `jmp` e verificarli con `ndisasm -o 0x7C00 boot.bin`.
+- [x] **2.** Ciclo di arresto con etichetta, `hlt` e `jmp`; prevedere i byte del `jmp` e verificarli con `ndisasm -o 0x7C00 boot.bin`.
 - [ ] **3.** Struttura completa (far jump, segmenti, stack) e stampa di un carattere con `INT 0x10`.
 - [ ] **4.** Stampa di una stringa terminata da 0 con un ciclo, preceduta da un a capo.
 - [ ] **5.** Togliere `org 0x7C00` e spiegare con il listing cosa stampa la CPU.
@@ -583,6 +583,77 @@ Funziona come previsto, con lo stesso risultato dell'esperimento della lezione 1
 - **EIP=0x7C02**: IP punta già all'istruzione dopo `hlt`;
 - **EFL=0x00000002**: IF = 0, effetto di `cli`;
 - **CS=0000** e **DL=0x80**: SeaBIOS ha saltato a `0000:7C00` dal primo disco rigido.
+
+#### Esercizio 2: risultati
+
+`cli` + `hlt` non bastano: `cli` non blocca gli **NMI**. Se ne arriva uno, la CPU riparte dall'istruzione dopo `hlt`, cioè dagli zeri. La soluzione è un ciclo: se la CPU viene svegliata, torna subito a dormire.
+
+```nasm
+bits 16
+org 0x7C00
+cli
+TornaAHlt: hlt
+jmp TornaAHlt
+times 510-($-$$) db 0x00
+dw 0xAA55
+```
+
+**Previsione, prima di assemblare:**
+
+1. `cli` a 0x7C00, `TornaAHlt` (cioè `hlt`) a 0x7C01, il `jmp` a 0x7C02–0x7C03 (2 byte).
+2. Dopo il fetch del `jmp` IP vale **0x7C04**: la CPU legge tutta l'istruzione, cioè tutti e due i byte, e porta IP oltre. 0x7C03 è il secondo byte del `jmp`, non un'istruzione, e non è nemmeno la destinazione.
+3. Per andare da 0x7C04 a 0x7C01 serve una distanza di **−3**, che in complemento a due a 8 bit è **`FD`**.
+4. Primi 4 byte: **`FA F4 EB FD`**.
+
+**Verifica** con `xxd boot.bin | head -1`:
+
+```
+00000000: faf4 ebfd 0000 0000 0000 0000 0000 0000  ................
+```
+
+e con `ndisasm -o 0x7C00 boot.bin | head -4`:
+
+```
+00007C00  FA                cli
+00007C01  F4                hlt
+00007C02  EBFD              jmp 0x7c01
+00007C04  0000              add [bx+si],al
+```
+
+La previsione era giusta. La stessa istruzione si presenta in tre modi diversi:
+
+| Dove | Come appare | Cosa rappresenta |
+|---|---|---|
+| sorgente | `jmp TornaAHlt` | un nome |
+| byte | `EB FD` | una distanza: −3 |
+| `ndisasm` | `jmp 0x7c01` | un indirizzo assoluto, ricalcolato |
+
+L'indirizzo 0x7C01 non è scritto da nessuna parte nel file: `ndisasm` lo ricostruisce con lo stesso calcolo della CPU (0x7C04 − 3), e per farlo ha bisogno di `-o 0x7C00`, l'equivalente di `org`.
+
+**Il listing** (`boot.lst`):
+
+```
+     3 00000000 FA            cli
+     4 00000001 F4            TornaAHlt: hlt
+     5 00000002 EBFD          jmp TornaAHlt
+     6 00000004 00<rep 1FAh>  times 510-($-$$) db 0x00
+     7 000001FE 55AA          dw 0xAA55
+```
+
+- Alla riga dell'etichetta c'è solo `F4`, il byte di `hlt`: **l'etichetta non genera byte**, è solo un nome per l'indirizzo 0x7C01.
+- La prima colonna è la **posizione nel file** e parte da 0 anche con `org`: `org` cambia solo il valore delle etichette.
+- `00<rep 1FAh>`: 0x1FA = 506 zeri, cioè 510 − 4 byte di codice.
+
+**In QEMU** `info registers` mostra **EIP = 0x7C02** e HLT = 1, come nell'esercizio 1: `hlt` è sempre a 0x7C01, e mentre la CPU dorme IP punta già all'istruzione successiva, il `jmp`.
+
+**Esperimento con un NMI.** Il comando `nmi` del monitor di QEMU genera un NMI vero. Il confronto tra le due versioni:
+
+| Versione | Dopo `nmi` | Cosa è successo |
+|---|---|---|
+| Esercizio 1 (`cli` + `hlt`) | EIP = 0x0003, HLT = 0 | La CPU riparte da 0x7C02 (gli zeri), IP fa il giro e la CPU finisce nella trappola della IVT della lezione 1 |
+| Esercizio 2 (ciclo) | EIP = 0x7C02, HLT = 1 | La CPU esegue il `jmp`, torna su `hlt` e riprende a dormire |
+
+Due byte fanno la differenza tra una macchina ferma in modo sicuro e una CPU che esegue memoria a caso. È lo stesso ciclo che chiude ogni kernel quando non ha più niente da fare.
 
 #### Domande di verifica
 
