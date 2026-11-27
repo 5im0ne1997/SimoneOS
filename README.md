@@ -521,7 +521,7 @@ Ogni carattere è un numero (**ASCII**: `'A'` = 0x41, `'a'` = 0x61, `'0'` = 0x30
 
 - [x] **1.** Riscrivere `cli` + `hlt` in `boot.asm` con riempimento e firma; prevedere i byte e la dimensione; confrontare con `cmp` con l'immagine fatta a mano.
 - [x] **2.** Ciclo di arresto con etichetta, `hlt` e `jmp`; prevedere i byte del `jmp` e verificarli con `ndisasm -o 0x7C00 boot.bin`.
-- [ ] **3.** Struttura completa (far jump, segmenti, stack) e stampa di un carattere con `INT 0x10`.
+- [x] **3.** Struttura completa (far jump, segmenti, stack) e stampa di un carattere con `INT 0x10`.
 - [ ] **4.** Stampa di una stringa terminata da 0 con un ciclo, preceduta da un a capo.
 - [ ] **5.** Togliere `org 0x7C00` e spiegare con il listing cosa stampa la CPU.
 
@@ -654,6 +654,98 @@ L'indirizzo 0x7C01 non è scritto da nessuna parte nel file: `ndisasm` lo ricost
 | Esercizio 2 (ciclo) | EIP = 0x7C02, HLT = 1 | La CPU esegue il `jmp`, torna su `hlt` e riprende a dormire |
 
 Due byte fanno la differenza tra una macchina ferma in modo sicuro e una CPU che esegue memoria a caso. È lo stesso ciclo che chiude ogni kernel quando non ha più niente da fare.
+
+#### Esercizio 3: risultati
+
+Il settore di boot prepara da solo la macchina, senza fidarsi dello stato lasciato dal BIOS, e poi chiede al servizio video del BIOS di scrivere un carattere.
+
+```nasm
+bits 16
+org 0x7C00
+jmp 0x0000:ScriviS     ; far jump: CS = 0
+ScriviS:
+  cli
+  mov ax, 0            ; i segmenti si impostano passando da un registro generale
+  mov ds, ax
+  mov es, ax
+  mov ss, ax
+  mov sp, 0x7C00       ; subito dopo SS: la CPU blocca gli interrupt per un'istruzione
+  cld
+  sti
+  mov ah, 0x0E         ; funzione teletype del servizio video
+  mov al, 'S'          ; carattere
+  mov bh, 0            ; pagina video 0
+  int 0x10
+cli
+TornaAHlt: hlt
+jmp TornaAHlt
+times 510-($-$$) db 0x00
+dw 0xAA55
+```
+
+**Errori trovati durante la scrittura:**
+
+- `mov ds, 0` non esiste: la CPU non ha un'istruzione per mettere un valore immediato in un registro di segmento. Si passa da un registro generale (`mov ax, 0` poi `mov ds, ax`). SP invece è un registro generale, e `mov sp, 0x7C00` funziona direttamente.
+- `mov bh, ax` dà `invalid combination of opcode and operands` per due motivi: BH è da 8 bit e AX da 16, e in quel punto AX non vale più 0, perché AH e AL (le sue due metà) sono appena stati impostati. Corretto in `mov bh, 0`.
+
+**Previsioni, prima di assemblare:**
+
+1. Far jump: **`EA 05 7C 00 00`**. `EA` è il codice, `05 7C` l'offset 0x7C05 (il `jmp` occupa i 5 byte da 0x7C00 a 0x7C04, quindi `ScriviS` è a 0x7C05), `00 00` il segmento. A differenza di `EB FD`, qui c'è un **indirizzo assoluto**: senza `org` salterebbe nel posto sbagliato.
+2. **AX = 0x0E53**: AH = 0x0E (metà alta) e AL = 0x53, il codice ASCII di `'S'` (metà bassa).
+3. **SP = 0x7C00** nel ciclo di arresto: `int` fa 3 push (FLAGS, CS, IP: 6 byte) e `iret` fa 3 pop, quindi lo stack torna com'era.
+
+**Verifica** con `ndisasm -o 0x7C00 boot.bin | head -16`:
+
+```
+00007C00  EA057C0000        jmp word 0x0:word 0x7c05
+00007C05  FA                cli
+00007C06  B80000            mov ax,0x0
+00007C09  8ED8              mov ds,ax
+00007C0B  8EC0              mov es,ax
+00007C0D  8ED0              mov ss,ax
+00007C0F  BC007C            mov sp,0x7c00
+00007C12  FC                cld
+00007C13  FB                sti
+00007C14  B40E              mov ah,0xe
+00007C16  B053              mov al,0x53
+00007C18  B700              mov bh,0x0
+00007C1A  CD10              int byte 0x10
+00007C1C  FA                cli
+00007C1D  F4                hlt
+00007C1E  EBFD              jmp 0x7c1d
+```
+
+- Il far jump è esattamente come previsto.
+- `mov sp, 0x7C00` è `BC 00 7C`: codice dell'istruzione e valore in little-endian, senza registro intermedio.
+- Il `jmp` del ciclo è ancora `EB FD`: la distanza è la stessa anche se il ciclo si è spostato a 0x7C1D. È il vantaggio dei salti relativi.
+
+**In QEMU** la **S** compare sotto la scritta "Booting from Hard Disk...". `info registers`:
+
+```
+EAX=00000e53 EBX=00000000 ECX=00000000 EDX=00000080
+ESI=00000000 EDI=00000000 EBP=00000000 ESP=00007c00
+EIP=00007c1e EFL=00000002 [-------] CPL=0 II=0 A20=1 SMM=0 HLT=1
+ES =0000 00000000 0000ffff 00009300
+CS =0000 00000000 0000ffff 00009b00
+SS =0000 00000000 0000ffff 00009300
+DS =0000 00000000 0000ffff 00009300
+```
+
+- **AX = 0x0E53** e **SP = 0x7C00**: le previsioni 2 e 3 sono confermate.
+- **CS, DS, ES, SS = 0**: i segmenti li ha impostati il nostro codice.
+- **EIP = 0x7C1E** e HLT = 1: la CPU dorme su `hlt` (0x7C1D) e IP punta già al `jmp`.
+- **EFL = 0x00000002**: IF = 0 per il `cli` prima del ciclo, e DF = 0 per `cld`.
+
+**La S nella memoria video.** In modalità testo lo schermo è una griglia 80 × 25 che parte da **0xB8000**, 2 byte per casella (carattere e attributo), quindi 160 byte per riga. Leggendo la memoria video dal monitor di QEMU:
+
+```
+riga 0  (0xB8000)  SeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+riga 3  (0xB81E0)  iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+...
+riga 7  (0xB8460)  Booting from Hard Disk...
+riga 8  (0xB8500)  S
+```
+
+La S si trova a 0xB8000 + 8 × 160 = **0xB8500**, nella pagina 0, quella mostrata. Il servizio video del BIOS non ha fatto altro che scrivere `53` (e l'attributo `07`, grigio su nero) a quell'indirizzo: scrivere in memoria significa disegnare sullo schermo (*memory-mapped I/O*). Nella fase 4 lo faremo direttamente, senza il BIOS.
 
 #### Domande di verifica
 
